@@ -25,6 +25,7 @@
 #include "global/async/promise.h"
 #include "global/async/channel.h"
 #include "audio/common/audiotypes.h"
+#include "../iaudiosource.h"
 
 namespace muse::audio::engine {
 class IAudioContext
@@ -46,6 +47,11 @@ public:
     // Tracks
     virtual RetVal2<TrackId, TrackParams> addTrack(const TrackName& trackName, io::IODevice* playbackData, const TrackParams& params) = 0;
     virtual RetVal2<TrackId, TrackParams> addTrack(const TrackName& trackName, const mpe::PlaybackData& playbackData,
+                                                   const TrackParams& params) = 0;
+    //! Adds a track backed by a caller-supplied IAudioSource (e.g. an audio file).
+    //! This is the Sound_track path; unlike the IODevice overload above it actually
+    //! builds an audio chain, so the track produces sound.
+    virtual RetVal2<TrackId, TrackParams> addTrack(const TrackName& trackName, IAudioSourcePtr source,
                                                    const TrackParams& params) = 0;
     virtual RetVal2<TrackId, TrackParams> addAuxTrack(const TrackName& trackName, const TrackParams& params) = 0;
 

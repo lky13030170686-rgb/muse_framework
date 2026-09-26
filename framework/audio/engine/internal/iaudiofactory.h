@@ -28,6 +28,7 @@
 #include "../isynthesizer.h"
 #include "nodes/audiosourcenode.h"
 #include "nodes/fxchain.h"
+#include "../iaudiosource.h"
 
 namespace muse::audio::engine {
 class IAudioFactory : MODULE_GLOBAL_INTERFACE
@@ -56,6 +57,11 @@ public:
     virtual RetVal<AudioSourceNodePtr> makeEventSource(const TrackId trackId, const mpe::PlaybackData& playbackData,
                                                        const AudioInputParams& params,
                                                        const std::function<void()> onOffStreamReceived = nullptr) const = 0;
+
+    //! Wraps a caller-supplied IAudioSource (e.g. an audio file) into a node placeable in
+    //! a TrackChain. Additive: this is what makes TrackType::Sound_track work.
+    virtual AudioSourceNodePtr makeAudioFileSource(const TrackId trackId, IAudioSourcePtr source) const = 0;
+
     // Make FX
     virtual FxChainPtr makeMasterFxChain(const AudioFxChain& fxChain) const = 0;
     virtual FxChainPtr makeTrackFxChain(const TrackId trackId, const AudioFxChain& fxChain) const = 0;

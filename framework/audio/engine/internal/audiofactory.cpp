@@ -25,6 +25,7 @@
 #include "audio/common/audioerrors.h"
 
 #include "nodes/eventaudionode.h"
+#include "nodes/audiofilenode.h"
 
 using namespace muse;
 using namespace muse::audio;
@@ -77,6 +78,13 @@ RetVal<AudioSourceNodePtr> AudioFactory::makeEventSource(const TrackId trackId, 
     source->setOutputSpec(audioEngine()->outputSpec());
     source->applyInputParams(params);
     return RetVal<AudioSourceNodePtr>::make_ok(source);
+}
+
+AudioSourceNodePtr AudioFactory::makeAudioFileSource(const TrackId trackId, IAudioSourcePtr source) const
+{
+    auto node = std::make_shared<AudioFileNode>(trackId, std::move(source));
+    node->setOutputSpec(audioEngine()->outputSpec());
+    return node;
 }
 
 FxChainPtr AudioFactory::makeMasterFxChain(const AudioFxChain& fxChain) const
