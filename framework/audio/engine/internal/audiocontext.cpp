@@ -161,11 +161,66 @@ RetVal2<TrackId, TrackParams> AudioContext::addTrack(const std::string& trackNam
     track.name = trackName;
     track.params = params;
     //! NOT IMPLEMENTED YET
-    // track.chain = ...
+    //! The IODevice overload is still non-functional: decoding raw device data into an
+    //! IAudioSource needs a format decision that belongs to the caller. Use the
+    //! addTrack(trackName, IAudioSourcePtr, params) overload below, which builds a real
+    //! chain and therefore actually produces sound.
 
     doAddTrack(track);
 
     return RetType::make_ok(trackId, { });
+}
+
+RetVal2<TrackId, TrackParams> AudioContext::addTrack(const std::string& trackName,
+                                                     IAudioSourcePtr source,
+                                                     const TrackParams& params)
+{
+    ONLY_AUDIO_ENGINE_THREAD;
+
+    using RetType = RetVal2<TrackId, TrackParams>;
+
+    if (!source) {
+        return RetType::make_ret(Err::InvalidAudioFilePath);
+    }
+
+    TrackId trackId = newTrackId();
+
+    // Wrap the caller's source into a node the chain can drive. Mirrors the
+    // PlaybackData overload below, minus the synth/MPE parts a file source has no use for.
+    AudioSourceNodePtr sourceNode = audioFactory()->makeAudioFileSource(trackId, std::move(source));
+    IF_ASSERT_FAILED(sourceNode) {
+        return RetType::make_ret(Err::InvalidAudioFilePath);
+    }
+
+    AutomationControlNodePtr controlNode = std::make_shared<AutomationControlNode>();
+    controlNode->setPlayheadPosition(std::static_pointer_cast<IPlayheadPosition>(m_player));
+
+    TrackChainPtr trackChain = std::make_shared<TrackChain>(trackId, trackName);
+    trackChain->setOutputSpec(outputSpec());
+    trackChain->setMode(mode());
+    trackChain->setSource(sourceNode);
+    trackChain->setFxChain(nullptr);   // will be added later
+    trackChain->setControl(controlNode);
+    trackChain->setSignal(std::make_shared<SignalNode>());
+    trackChain->rebuild();
+
+    Ret ret = m_mixer->addTrack(trackChain, params.auxSends);
+    if (!ret) {
+        return RetType::make_ret(ret);
+    }
+
+    Track track;
+    track.type = TrackType::Sound_track;
+    track.id = trackId;
+    track.name = trackName;
+    track.params = params;
+    track.chain = trackChain;
+
+    onControlParamsChanged(track, params.control);
+
+    doAddTrack(track);
+
+    return RetType::make_ok(trackId, track.params);
 }
 
 RetVal2<TrackId, TrackParams> AudioContext::addTrack(const std::string& trackName,

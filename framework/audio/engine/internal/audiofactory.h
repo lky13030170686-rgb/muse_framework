@@ -52,6 +52,8 @@ public:
     RetVal<AudioSourceNodePtr> makeEventSource(const TrackId trackId, const mpe::PlaybackData& playbackData, const AudioInputParams& params,
                                                const std::function<void()> onOffStreamReceived = nullptr) const override;
 
+    AudioSourceNodePtr makeAudioFileSource(const TrackId trackId, IAudioSourcePtr source) const override;
+
     // Make FX
     FxChainPtr makeMasterFxChain(const AudioFxChain& fxChain) const override;
     FxChainPtr makeTrackFxChain(const TrackId trackId, const AudioFxChain& fxChain) const override;
