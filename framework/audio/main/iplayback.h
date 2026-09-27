@@ -64,6 +64,11 @@ public:
     virtual async::Promise<TrackId, TrackParams> addTrack(const TrackName& name, const mpe::PlaybackData& data,
                                                           const TrackParams& params) = 0;
 
+    //! Adds a track backed by an audio file. The engine opens the file itself, so only
+    //! the path crosses the RPC boundary — this is the Sound_track (backing audio) entry.
+    virtual async::Promise<TrackId, TrackParams> addTrack(const TrackName& name, const std::string& filePath,
+                                                          const TrackParams& params) = 0;
+
     virtual async::Promise<TrackId, TrackParams> addAuxTrack(const TrackName& trackName, const TrackParams& params) = 0;
 
     virtual void removeTrack(const TrackId trackId) = 0;

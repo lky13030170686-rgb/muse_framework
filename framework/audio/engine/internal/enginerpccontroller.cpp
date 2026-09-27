@@ -300,6 +300,37 @@ void EngineRpcController::init()
             }
         });
 
+        onLongRequest(ctxId, MsgCode::AddTrackWithFilePath, [this](const Msg& msg) {
+            ONLY_AUDIO_RPC_THREAD;
+
+            using RetType = RetVal2<TrackId, TrackParams>;
+
+            TrackName trackName;
+            std::string filePath;
+            TrackParams params;
+            IF_ASSERT_FAILED(RpcPacker::unpack(msg.data, trackName, filePath, params)) {
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidRpcData)));
+            }
+
+            if (!audioFileSourceProvider()) {
+                LOGE() << "no IAudioFileSourceProvider registered, cannot add file track";
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidAudioFilePath)));
+            }
+
+            IAudioSourcePtr source = audioFileSourceProvider()->createSource(filePath);
+            if (!source) {
+                LOGE() << "failed to create audio source for file: " << filePath;
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidAudioFilePath)));
+            }
+
+            if (auto actx = audioContext(msg.ctxId)) {
+                RetType ret = actx->addTrack(trackName, source, params);
+                return make_response(msg, RpcPacker::pack(ret));
+            } else {
+                return make_response(msg, RpcPacker::pack(RetType::make_ret(Err::InvalidContext)));
+            }
+        });
+
         onLongRequest(ctxId, MsgCode::AddAuxTrack, [this](const Msg& msg) {
             ONLY_AUDIO_RPC_THREAD;
 
