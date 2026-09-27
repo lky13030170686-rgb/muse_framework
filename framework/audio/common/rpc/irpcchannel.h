@@ -78,6 +78,9 @@ enum class MsgCode {
     GetTrackName,
     AddTrackWithPlaybackData,
     AddTrackWithIODevice,
+    //! Adds a Sound_track backed by an audio FILE PATH. The engine side opens the file
+    //! itself, so only a string crosses the boundary — no pointer lifetime concerns.
+    AddTrackWithFilePath,
     AddAuxTrack,
     // notification
     TrackAdded,
@@ -177,6 +180,7 @@ inline std::string to_string(MsgCode m)
     case MsgCode::GetTrackName: return "GetTrackName";
     case MsgCode::AddTrackWithPlaybackData: return "AddTrackWithPlaybackData";
     case MsgCode::AddTrackWithIODevice: return "AddTrackWithIODevice";
+    case MsgCode::AddTrackWithFilePath: return "AddTrackWithFilePath";
     case MsgCode::AddAuxTrack: return "AddAuxTrack";
     case MsgCode::TrackAdded: return "TrackAdded";
     case MsgCode::TrackRemoved: return "TrackRemoved";

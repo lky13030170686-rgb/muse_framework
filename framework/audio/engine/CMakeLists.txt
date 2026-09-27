@@ -38,6 +38,7 @@ else()
         iaudioengineconfiguration.h
         ienginecontroller.h
         iaudiosource.h
+        iaudiofilesourceprovider.h
         iplayhead.h
         iengineplayer.h
         ifxprocessor.h

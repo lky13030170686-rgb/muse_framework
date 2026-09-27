@@ -31,6 +31,7 @@
 
 #include "iaudiocontext.h"
 #include "iexecoperation.h"
+#include "../iaudiofilesourceprovider.h"
 
 namespace muse::audio::engine {
 class EngineRpcController : public async::Asyncable
@@ -39,6 +40,9 @@ class EngineRpcController : public async::Asyncable
     GlobalInject<synth::ISoundFontRepository> soundFontRepository;
     GlobalInject<rpc::IRpcChannel> channel;
     GlobalInject<IAudioEngine> audioEngine;
+    //! Optional: registered by the application layer to enable file-backed audio tracks.
+    //! Absent in builds without a decoder; the engine stays usable without it.
+    GlobalInject<IAudioFileSourceProvider> audioFileSourceProvider;
 
 public:
     EngineRpcController(IExecOperation* execOperation);

@@ -61,6 +61,7 @@ public:
 
     async::Promise<TrackId, TrackParams> addTrack(const TrackName& name, io::IODevice* data, const TrackParams& params) override;
     async::Promise<TrackId, TrackParams> addTrack(const TrackName& name, const mpe::PlaybackData& data, const TrackParams& params) override;
+    async::Promise<TrackId, TrackParams> addTrack(const TrackName& name, const std::string& filePath, const TrackParams& params) override;
     async::Promise<TrackId, TrackParams> addAuxTrack(const TrackName& name, const TrackParams& params) override;
 
     void removeTrack(const TrackId trackId) override;
