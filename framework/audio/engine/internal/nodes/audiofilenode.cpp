@@ -45,6 +45,11 @@ void AudioFileNode::onModeChanged(const ProcessMode mode)
 {
     ONLY_AUDIO_ENGINE_THREAD;
 
+    // Forwarded to the source, which decides for itself whether to produce sound: a file
+    // source is audible only while the transport runs. The engine drives this from the
+    // player's isActiveChanged, so ProcessMode::Playing means "the score is playing", and
+    // ContextPlayer::seekAllTracks re-seeks every source on play, pause and seek -- which is
+    // what makes the track follow the cursor.
     if (m_source) {
         m_source->setMode(mode);
     }
@@ -71,7 +76,8 @@ void AudioFileNode::doSelfProcess(float* buffer, samples_t samplesPerChannel)
         return;
     }
 
-    // The source produces silence past its own end, so no bound check is needed here.
+    // The source produces silence past its own end and while the transport is stopped, so no
+    // bound or transport check is needed here.
     m_source->process(buffer, samplesPerChannel);
 }
 
