@@ -23,6 +23,8 @@
 #include "musesamplersequencer.h"
 
 #include <algorithm>
+#include <cmath>
+#include <unordered_set>
 
 #include "apitypes.h"
 
@@ -179,6 +181,9 @@ void MuseSamplerSequencer::updateOffStreamEvents(const PlaybackEventsMap& events
 void MuseSamplerSequencer::clearAllTracks()
 {
     m_layerIdxToTrackIdx.clear();
+    //! NOTE: [our addition] the own-velocity tracks are cleared too; they are rebuilt from the
+    //! events alongside the layer tracks (see loadEvents/addNoteEvent).
+    m_velocityGroupToTrackIdx.clear();
     m_presetChangesByTrack.clear();
 
     for (ms_Track track : allTracks()) {
@@ -208,11 +213,10 @@ ms_Track MuseSamplerSequencer::findOrCreateTrack(layer_idx_t layerIdx)
         m_layerIdxToTrackIdx.erase(it);
     }
 
-    // Try to find a free track
-    std::unordered_set<track_idx_t> assignedTracks(m_layerIdxToTrackIdx.size());
-    for (const auto& pair: m_layerIdxToTrackIdx) {
-        assignedTracks.insert(pair.second);
-    }
+    // Try to find a free track.
+    //! NOTE: [our addition] the velocity-group tracks count as taken too - they live in the same
+    //! pool, and without this a layer could be handed a track that a velocity group already uses.
+    std::unordered_set<track_idx_t> assignedTracks = assignedTrackIndexes();
 
     for (track_idx_t trackIdx = 0; trackIdx < tracks.size(); ++trackIdx) {
         if (!muse::contains(assignedTracks, trackIdx)) {
@@ -236,6 +240,57 @@ ms_Track MuseSamplerSequencer::findOrCreateTrack(layer_idx_t layerIdx)
 
     UNREACHABLE;
     return nullptr;
+}
+
+std::unordered_set<track_idx_t> MuseSamplerSequencer::assignedTrackIndexes() const
+{
+    std::unordered_set<track_idx_t> result(m_layerIdxToTrackIdx.size() + m_velocityGroupToTrackIdx.size());
+    for (const auto& pair : m_layerIdxToTrackIdx) {
+        result.insert(pair.second);
+    }
+    for (const auto& pair : m_velocityGroupToTrackIdx) {
+        result.insert(pair.second);
+    }
+
+    return result;
+}
+
+ms_Track MuseSamplerSequencer::findOrCreateVelocityTrack(layer_idx_t layerIdx, float velocity)
+{
+    //! Quantise so that float noise cannot spawn a track per note; one thousandth is far finer than
+    //! anything a listener could tell apart, and equal velocities share a track.
+    const int thousandths = int(std::lround(std::clamp(velocity, 0.f, 1.f) * 1000.f));
+    const uint64_t key = (uint64_t(layerIdx) << 32) | uint64_t(thousandths);
+
+    const TrackList& tracks = m_tracks->allTracks();
+    auto it = m_velocityGroupToTrackIdx.find(key);
+    if (it != m_velocityGroupToTrackIdx.end()) {
+        if (it->second < tracks.size()) {
+            return tracks.at(it->second);
+        }
+
+        ASSERT_X("Invalid velocity track index");
+        m_velocityGroupToTrackIdx.erase(it);
+    }
+
+    // Reuse a free track when there is one, otherwise ask the synthesiser for another one - for the
+    // same instrument, which is what makes this work at all.
+    std::unordered_set<track_idx_t> assigned = assignedTrackIndexes();
+    for (track_idx_t trackIdx = 0; trackIdx < tracks.size(); ++trackIdx) {
+        if (!muse::contains(assigned, trackIdx)) {
+            m_velocityGroupToTrackIdx.emplace(key, trackIdx);
+            return tracks.at(trackIdx);
+        }
+    }
+
+    ms_Track newTrack = m_tracks->addTrack();
+    if (newTrack) {
+        m_velocityGroupToTrackIdx.emplace(key, tracks.size() - 1);
+        return newTrack;
+    }
+
+    // No track available: fall back to the layer's own track, i.e. behave as before the change.
+    return findOrCreateTrack(layerIdx);
 }
 
 ms_Track MuseSamplerSequencer::findTrack(layer_idx_t layerIdx) const
@@ -314,9 +369,27 @@ void MuseSamplerSequencer::addNoteEvent(const mpe::NoteEvent& noteEvent)
     const voice_layer_idx_t voiceIdx = arrangementCtx.voiceLayerIndex;
     const layer_idx_t layerIdx = makeLayerIdx(arrangementCtx.staffLayerIndex, voiceIdx);
 
-    ms_Track track = findOrCreateTrack(layerIdx);
+    //! NOTE: [our addition] A note that carries its own velocity goes onto a track of its own.
+    //! MuseSampler's note event has no velocity field and its dynamics are per track, so the layer's
+    //! own track - whose dynamics follow the dynamic marks - cannot also hold "this one note is
+    //! louder". A separate track for the same instrument can, and does.
+    const std::optional<float>& velocityOverride = noteEvent.expressionCtx().velocityOverride;
+    const bool hasOwnVelocity = velocityOverride.has_value();
+
+    ms_Track track = hasOwnVelocity
+                     ? findOrCreateVelocityTrack(layerIdx, velocityOverride.value())
+                     : findOrCreateTrack(layerIdx);
     IF_ASSERT_FAILED(track) {
         return;
+    }
+
+    if (hasOwnVelocity) {
+        // One flat value for the whole track, placed at this note's start: it must NOT follow the
+        // layer's dynamic curve, which is exactly the point of the override.
+        const double ratio = std::clamp(static_cast<double>(velocityOverride.value()), 0.0, 1.0);
+        if (m_samplerLib->addDynamicsEvent(m_sampler, track, DynamicEvent { arrangementCtx.nominalTimestamp, ratio }) != ms_Result_OK) {
+            LOGE() << "Unable to add dynamics event for an own-velocity track";
+        }
     }
 
     for (const auto& art : articulations) {

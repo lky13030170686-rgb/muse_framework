@@ -44,6 +44,21 @@ private:
     ms_Track findOrCreateTrack(mpe::layer_idx_t layerIdx);
     ms_Track findTrack(mpe::layer_idx_t layerIdx) const;
 
+    //! NOTE: [our addition] MuseSampler's note event (`ms_NoteEvent_5`) has no velocity field, and
+    //! dynamics are per TRACK - so a note that carries its own velocity (`velocityOverride`) cannot
+    //! be expressed on the layer's normal track: the track's dynamics curve holds one value per
+    //! instant, which is exactly what makes "same moment, different loudness" impossible there.
+    //!
+    //! The way out is a track per (layer, velocity): the synthesiser happily gives us another track
+    //! for the very same instrument_id, each with its own dynamics curve. Notes with their own
+    //! velocity go there with a flat curve, while everything else stays on the layer's track and
+    //! keeps following the dynamic marks. See `findOrCreateVelocityTrack`.
+    ms_Track findOrCreateVelocityTrack(mpe::layer_idx_t layerIdx, float velocity);
+
+    //! The set of every track index this sequencer has handed out, so that the "find a free track"
+    //! logic in findOrCreateTrack() cannot hand the same track to a layer and a velocity group.
+    std::unordered_set<track_idx_t> assignedTrackIndexes() const;
+
     const TrackList& allTracks() const;
 
     void loadEvents(const mpe::PlaybackEventsMap& changes);
@@ -88,6 +103,10 @@ private:
     IMuseSamplerTracks* m_tracks = nullptr;
 
     std::unordered_map<mpe::layer_idx_t, track_idx_t> m_layerIdxToTrackIdx;
+    //! [our addition] (layer, velocity in thousandths) -> the track that plays those notes, see
+    //! findOrCreateVelocityTrack(). Nothing is added here unless a note actually carries its own
+    //! velocity, so a score that never used the piano roll's velocity lane behaves exactly as before.
+    std::unordered_map<uint64_t, track_idx_t> m_velocityGroupToTrackIdx;
     std::unordered_map<ms_Track, std::map<long long /*startUs*/, ms_PresetChange> > m_presetChangesByTrack;
 
     std::string m_defaultPresetCode;
