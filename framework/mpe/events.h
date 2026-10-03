@@ -149,6 +149,16 @@ struct NoteEvent
         return m_expressionCtx;
     }
 
+    //! [our addition] Replaces the loudness shape of this note.
+    //!
+    //! The constructor derives the curve from the articulations, which is right for everything the
+    //! notation says. But a shape drawn in the piano roll is about THIS note specifically, and it has
+    //! to win - and there is no other way in, since expressionCtx() is read-only.
+    void setExpressionCurve(const ExpressionCurve& curve)
+    {
+        m_expressionCtx.expressionCurve = curve;
+    }
+
     bool operator==(const NoteEvent& other) const
     {
         return m_arrangementCtx == other.m_arrangementCtx
