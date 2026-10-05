@@ -40,6 +40,11 @@ void ShortcutsController::activate(const std::string& sequence)
 
     ActionCode actionCode = resolveAction(sequence);
 
+    //! ⚠️ 观测点（排查 MIDI 页 Ctrl+Z 被吞，用完删）：
+    //! 全局 `Shortcut` 触发后走到这里；`action` 为空就说明按键被静默丢弃了。
+    LOGW() << "[shortcut-probe] activate seq=" << sequence
+           << " -> action=" << actionCode;
+
     if (!actionCode.empty()) {
         dispatcher()->dispatch(actionCode);
     }
@@ -69,6 +74,11 @@ static bool defaultHasLowerPriorityThan(const std::string& ctx1, const std::stri
 ActionCode ShortcutsController::resolveAction(const std::string& sequence) const
 {
     ShortcutList shortcutsForSequence = shortcutsRegister()->shortcutsForSequence(sequence);
+
+    //! ⚠️ 观测点（排查 MIDI 页 Ctrl+Z 被吞，用完删）：候选数量 + 每个候选被跳过或通过的原因。
+    LOGW() << "[shortcut-probe] resolve seq=" << sequence
+           << " candidates=" << shortcutsForSequence.size();
+
     IF_ASSERT_FAILED(!shortcutsForSequence.empty()) {
         return ActionCode();
     }
@@ -77,12 +87,20 @@ ActionCode ShortcutsController::resolveAction(const std::string& sequence) const
 
     for (const Shortcut& sc : shortcutsForSequence) {
         //! NOTE Check if the shortcut itself is allowed
-        if (!uiContextResolver()->isShortcutContextAllowed(sc.context)) {
-            continue;
-        }
+        const bool ctxAllowed = uiContextResolver()->isShortcutContextAllowed(sc.context);
 
         //! NOTE Check if the action is allowed
         muse::ui::UiActionState st = aregister()->actionState(sc.action);
+
+        LOGW() << "[shortcut-probe]   action=" << sc.action
+               << " ctx=" << sc.context
+               << " ctxAllowed=" << ctxAllowed
+               << " enabled=" << st.enabled;
+
+        if (!ctxAllowed) {
+            continue;
+        }
+
         if (!st.enabled) {
             continue;
         }
