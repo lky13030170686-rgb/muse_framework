@@ -53,7 +53,19 @@ QtObject {
     property Component component: Component {
         id: shortcutComponent
         Shortcut {
-            context: Qt.WindowShortcut
+            //! ⚠️ `Qt::ApplicationShortcut` 而不是 `Qt::WindowShortcut`（2026-10-05 改）。
+            //!
+            //! `WindowShortcut` 只在"该 Shortcut 所属的那个窗口"激活时匹配。而 MIDI 页
+            //! （`musescore://midi`）的 QML 跑在一个 **QWidget 宿主**里
+            //! （实测 `Interactive::topWindowIsWidget()` 在那一页为 true），于是这些挂在
+            //! `AppWindow` 上的快捷键在 MIDI 页**根本不触发** —— 日志里连
+            //! `ShortcutsController::activate()` 都不会被调用，按键被静默吞掉
+            //! （用户实测：**记谱页 Ctrl+Z 生效、MIDI 页毫无反应**）。
+            //!
+            //! `ApplicationShortcut` 只要应用活动就匹配，跨窗口，正好覆盖这种情况。
+            //! 模态对话框那种场景另有保护（`interactive.cpp` 打开颜色对话框时会
+            //! `shortcutsRegister()->setActive(false)`）。
+            context: Qt.ApplicationShortcut
             enabled: shortcutsModel.active
             onActivated: shortcutsModel.activate(sequence)
         }
