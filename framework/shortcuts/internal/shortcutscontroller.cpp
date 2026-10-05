@@ -40,10 +40,10 @@ void ShortcutsController::activate(const std::string& sequence)
 
     ActionCode actionCode = resolveAction(sequence);
 
-    //! ⚠️ 观测点（排查 MIDI 页 Ctrl+Z 被吞，用完删）：
-    //! 全局 `Shortcut` 触发后走到这里；`action` 为空就说明按键被静默丢弃了。
-    LOGW() << "[shortcut-probe] activate seq=" << sequence
-           << " -> action=" << actionCode;
+    //! NOTE: 排查快捷键“按了没反应”时，用 `MuseScoreStudio5.exe -d` 启动即可看到这一行
+    //! （`-d` 把日志级别设为 Debug）—— `action` 为空就说明按键被静默丢弃了。
+    //! ⚠️ 更多细节（含 Qt 自己的匹配过程）用环境变量 `QT_LOGGING_RULES=qt.gui.shortcutmap=true`。
+    LOGD() << "resolved action: " << actionCode;
 
     if (!actionCode.empty()) {
         dispatcher()->dispatch(actionCode);
@@ -75,10 +75,6 @@ ActionCode ShortcutsController::resolveAction(const std::string& sequence) const
 {
     ShortcutList shortcutsForSequence = shortcutsRegister()->shortcutsForSequence(sequence);
 
-    //! ⚠️ 观测点（排查 MIDI 页 Ctrl+Z 被吞，用完删）：候选数量 + 每个候选被跳过或通过的原因。
-    LOGW() << "[shortcut-probe] resolve seq=" << sequence
-           << " candidates=" << shortcutsForSequence.size();
-
     IF_ASSERT_FAILED(!shortcutsForSequence.empty()) {
         return ActionCode();
     }
@@ -92,10 +88,10 @@ ActionCode ShortcutsController::resolveAction(const std::string& sequence) const
         //! NOTE Check if the action is allowed
         muse::ui::UiActionState st = aregister()->actionState(sc.action);
 
-        LOGW() << "[shortcut-probe]   action=" << sc.action
-               << " ctx=" << sc.context
-               << " ctxAllowed=" << ctxAllowed
-               << " enabled=" << st.enabled;
+        LOGD() << "candidate action: " << sc.action
+               << ", ctx: " << sc.context
+               << ", ctxAllowed: " << ctxAllowed
+               << ", enabled: " << st.enabled;
 
         if (!ctxAllowed) {
             continue;
