@@ -132,9 +132,21 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
     const bool loopWillBeCrossed = m_timeLoopStart < m_timeLoopEnd
                                    && newTime.time() + delta.time() > m_timeLoopEnd;
     if (loopWillBeCrossed) {
-        //! Clamped to the loop length, so that a loop shorter than one chunk cannot wrap past its own end.
-        const secs_t overshoot = std::min(newTime.time() + delta.time() - m_timeLoopEnd,
-                                          m_timeLoopEnd - m_timeLoopStart);
+        //! ⚠️ …and the wrap goes back to **exactly** the loop start - no overshoot.
+        //!
+        //! The sequencers are repositioned with `lower_bound(position)`, which *includes* the events
+        //! sitting exactly on that position. Seeking to `loopStart + overshoot` therefore skipped every
+        //! note in that little window - including the downbeat of the loop's first bar, which is exactly
+        //! where the note is in most music. That was audible as "循环回来第一小节会丢音" (user, 2026-10-06,
+        //! 进度快照.md 第 67 条): the loop's first pass was fine (playback starts *at* the loop start), only
+        //! the wraps lost those notes.
+        //!
+        //! Wrapping the clock to the same place keeps the audio and the playhead in step. What is given up
+        //! is the tail: the part of the loop between the last rendered chunk and the loop end (up to one
+        //! chunk, ≈21 ms at 48 kHz) is not played, and the loop is that much shorter. A fully seamless wrap
+        //! would need the sequencers to be loop-aware (render across the boundary in one chunk) - not done
+        //! here; see the note in 维护手册.md §4.8.2.
+        const TimePosition loopedTime = TimePosition::fromTime(m_timeLoopStart, delta.sampleRate());
 
         //! ⚠️ The tracks must be seeked to the position the clock wraps **to**, not to the position where
         //! the loop ended. `LoopEnded` used to carry `newTime` (= loop end + overshoot), so every wrap left
@@ -146,7 +158,6 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
         //! NOTE: reported by the user as "循环后播放的声音与音符不符" on the MIDI page (which is where
         //! setting a loop became easy). See 进度快照.md 第 65 条 - the measurement was
         //! `clock wraps to 2.01067 but the tracks are seeked to 6.01067` for a loop of [2, 6].
-        const TimePosition loopedTime = TimePosition::fromTime(m_timeLoopStart + overshoot, delta.sampleRate());
 
         //! ⚠️ …and it has to happen **here**, not through an engine operation: an operation is delivered
         //! asynchronously, so until it lands the tracks keep rendering - and triggering - the events just
