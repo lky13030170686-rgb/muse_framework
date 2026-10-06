@@ -23,6 +23,7 @@
 #pragma once
 
 #include <QColor>
+#include <QPainterPath>
 #include <QPointF>
 #include <QQuickPaintedItem>
 #include <QVector>
@@ -66,6 +67,13 @@ class PolylinePlot : public QQuickPaintedItem, public muse::async::Asyncable, pu
 
     Q_PROPERTY(bool isSnapEnabled READ isSnapEnabled WRITE setIsSnapEnabled NOTIFY isSnapEnabledChanged)
     Q_PROPERTY(qreal snapThresholdPx READ snapThresholdPx WRITE setSnapThresholdPx NOTIFY snapThresholdPxChanged)
+
+    //! Optional bends, one per segment of `points()` (segment i joins points()[i] and points()[i + 1]),
+    //! in the same coordinates as the points. A segment marked with noBend() is drawn straight.
+    Q_PROPERTY(QVector<QPointF> bends READ bends WRITE setBends NOTIFY bendsChanged)
+    //! Whether the bends are drawn as grab-and-drag handles. Off by default: a plot that only draws
+    //! a curve gets no new hit targets.
+    Q_PROPERTY(bool bendHandlesEnabled READ bendHandlesEnabled WRITE setBendHandlesEnabled NOTIFY bendHandlesEnabledChanged)
 
     Q_PROPERTY(QVector<QPointF> points READ points WRITE setPoints NOTIFY pointsChanged)
     // indices in the colorsUnderLine vector relate to the lines between points (not the points themselves)
@@ -132,6 +140,16 @@ public:
     qreal snapThresholdPx() const;
     void setSnapThresholdPx(qreal);
 
+    //! Marks a segment as "not bent" in a bends() vector.
+    static QPointF noBend();
+    static bool isBend(const QPointF& bend);
+
+    QVector<QPointF> bends() const;
+    void setBends(const QVector<QPointF>& bends);
+
+    bool bendHandlesEnabled() const;
+    void setBendHandlesEnabled(bool enabled);
+
     QVector<QPointF> points() const;
     void setPoints(const QVector<QPointF>&);
 
@@ -183,9 +201,15 @@ signals:
     void isSnapEnabledChanged();
     void snapThresholdPxChanged();
 
+    void bendsChanged();
+    void bendHandlesEnabledChanged();
+
     void pointAdded(qreal x, qreal y, bool completed);
     void pointMoved(int index, qreal x, qreal y, bool completed);
     void pointRemoved(int index, bool completed);
+    //! `segmentIndex` is the index of the segment in `points()` the bend belongs to, i.e. the bend
+    //! sits between points()[segmentIndex] and points()[segmentIndex + 1].
+    void bendMoved(int segmentIndex, qreal x, qreal y, bool completed);
     void dragCancelled();
     void interactionFinished();
 
@@ -214,10 +238,29 @@ protected:
     void mouseDoubleClickEvent(QMouseEvent* e) override;
 
 private:
+    //! One drawable segment of the plot, in pixels. `domainFrom` is the index in points() the
+    //! segment starts at (-1 for the synthetic pieces that lead to/from the plot's edges), which is
+    //! also how a bend is addressed.
+    struct PlotSegment {
+        QPointF from;
+        QPointF to;
+        QPointF bend;
+        bool isBent = false;
+        int domainFrom = -1;
+    };
+
     QVector<QPointF> polylinePx() const;
     bool isNearLinePx(const QPointF& px) const;
     GhostPoint ghostPointToPolylinePx(const QPointF& px) const;
     int pointIndexAtPx(const QPointF& px) const;
+
+    bool hasBends() const;
+    QPointF toPx(const QPointF& pN) const;
+    QPointF bendPxFor(int domainSegmentStart) const;
+    QVector<PlotSegment> plotSegmentsPx() const;
+    QVector<QPointF> curvePolylinePx() const;
+    QPainterPath segmentPath(const PlotSegment& segment) const;
+    int bendIndexAtPx(const QPointF& px) const;
 
     void updateCursor();
     void resetGestureState();
@@ -244,6 +287,7 @@ private:
     void updateActivePoint();
 
     void drawLinesAndFillUnder(QPainter* painter) const;
+    void drawBendHandles(QPainter* painter) const;
     void paintPoint(QPainter* painter, const PolylinePointStyle* style, const QPointF& centre, bool useHoveredStyle) const;
 
 private:
@@ -268,6 +312,12 @@ private:
 
     // mapping for m_pointsNVisible -> index in m_points
     QVector<int> m_visibleToDomainIndex;
+
+    //! One entry per segment of m_points (empty = the plot is entirely straight). Entries that are
+    //! noBend() are drawn as straight lines. `hasBends()` decides whether the vector is usable, so
+    //! a bend list that no longer matches the points is ignored rather than mis-drawn.
+    QVector<QPointF> m_bends;
+    bool m_bendHandlesEnabled = false;
 
     QVector<QColor> m_colorsUnderLine;
 
@@ -294,6 +344,8 @@ private:
     QPointF m_pressPx;
     bool m_pressedOnPoint = false;
     int m_pressedPointIndex = -1;
+    //! Segment (index in m_points) whose bend handle is being dragged, -1 when none is
+    int m_pressedBendIndex = -1;
     bool m_hasDraggedPointDomain = false;
     QPointF m_draggedPointDomain;
 
