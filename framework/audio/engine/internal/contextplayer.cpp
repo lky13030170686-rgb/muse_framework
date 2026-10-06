@@ -111,8 +111,30 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
 
     // Check: Loop
     const TimePosition newTime = m_currentPosition.forwarded(delta);
-    if (m_timeLoopStart < m_timeLoopEnd && newTime.time() >= m_timeLoopEnd) {
-        const secs_t overshoot = newTime.time() - m_timeLoopEnd;
+
+    //! ⚠️ The wrap happens one chunk **early**, and that is deliberate.
+    //!
+    //! The tracks are rendered *before* the clock within a cycle: `AudioNode::process()` renders its input
+    //! first and then itself, and this player's playhead node has the whole track chain as its input. So by
+    //! the time the clock reaches the loop end, the chunk that crosses it has already been rendered - and
+    //! with it the note sitting exactly on the loop end, i.e. the first note of the bar after the loop. That
+    //! was audible as a stray attack at the loop wrap (user: "奇数次播放会播放到循环外小节的音头",
+    //! 进度快照.md 第 66 条).
+    //!
+    //! Wrapping while the *next* chunk would cross the loop end keeps the tracks away from the loop end
+    //! altogether: the seek below repositions them before that chunk is rendered, so nothing at or past the
+    //! loop end is ever triggered. The cost is that up to one chunk (1024 samples ≈ 21 ms at 48 kHz) at the
+    //! end of the loop is skipped - the flush that comes with the seek cuts the sound at the wrap anyway, so
+    //! this is not a new loss, it just makes the boundary deterministic.
+    //!
+    //! NOTE: the loop end is *exclusive* - a note starting exactly on it belongs to the bar after the loop
+    //! and must not sound while looping.
+    const bool loopWillBeCrossed = m_timeLoopStart < m_timeLoopEnd
+                                   && newTime.time() + delta.time() > m_timeLoopEnd;
+    if (loopWillBeCrossed) {
+        //! Clamped to the loop length, so that a loop shorter than one chunk cannot wrap past its own end.
+        const secs_t overshoot = std::min(newTime.time() + delta.time() - m_timeLoopEnd,
+                                          m_timeLoopEnd - m_timeLoopStart);
 
         //! ⚠️ The tracks must be seeked to the position the clock wraps **to**, not to the position where
         //! the loop ended. `LoopEnded` used to carry `newTime` (= loop end + overshoot), so every wrap left
@@ -126,7 +148,12 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
         //! `clock wraps to 2.01067 but the tracks are seeked to 6.01067` for a loop of [2, 6].
         const TimePosition loopedTime = TimePosition::fromTime(m_timeLoopStart + overshoot, delta.sampleRate());
 
-        m_timeEvent.send(TimeEvent { TimeEventType::LoopEnded, loopedTime }); // forwarding an event to the engine thread
+        //! ⚠️ …and it has to happen **here**, not through an engine operation: an operation is delivered
+        //! asynchronously, so until it lands the tracks keep rendering - and triggering - the events just
+        //! past the loop end. The upstream TODO right here says the same thing:
+        //! "Seek may be necessary to call this directly within the PROC thread."
+        seekAllTracks(loopedTime);
+
         return loopedTime;
     }
 
@@ -337,7 +364,15 @@ Channel<bool> ContextPlayer::isActiveChanged() const
 void ContextPlayer::seekAllTracks(const TimePosition& position)
 {
     ONLY_AUDIO_ENGINE_THREAD;
-    ONLY_ON_OPERATION_EXEC;
+
+    //! NOTE: deliberately **no** `ONLY_ON_OPERATION_EXEC` here. Besides the ordinary seeks (which do run
+    //! inside an engine operation), this is also called from the loop wrap, which is detected while the
+    //! clock is being forwarded - i.e. inside the processing cycle - and that is the whole point of the
+    //! call there: an operation-based seek is delivered asynchronously, and until it lands the tracks keep
+    //! rendering (and triggering) the events just past the loop end, so the note that starts exactly at
+    //! the loop end - the downbeat of the bar after the loop - was audible as a stray attack.
+    //! Safe because the processing thread **is** the engine thread (`AudioSanitizer::isEngineThread()`
+    //! covers both, see audiosanitizer.h), so no cross-thread access happens here. See 进度快照.md 第 66 条.
 
     IF_ASSERT_FAILED(m_trackSource) {
         return;
