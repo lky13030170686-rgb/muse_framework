@@ -112,10 +112,22 @@ TimePosition ContextPlayer::proc_onTimeChanged(const TimePosition& delta)
     // Check: Loop
     const TimePosition newTime = m_currentPosition.forwarded(delta);
     if (m_timeLoopStart < m_timeLoopEnd && newTime.time() >= m_timeLoopEnd) {
-        //! TODO Seek may be necessary to call this directly within the PROC thread.
-        m_timeEvent.send(TimeEvent { TimeEventType::LoopEnded, newTime }); // forwarding an event to the engine thread
         const secs_t overshoot = newTime.time() - m_timeLoopEnd;
-        return TimePosition::fromTime(m_timeLoopStart + overshoot, delta.sampleRate());
+
+        //! ⚠️ The tracks must be seeked to the position the clock wraps **to**, not to the position where
+        //! the loop ended. `LoopEnded` used to carry `newTime` (= loop end + overshoot), so every wrap left
+        //! the sequencers playing the music that comes **after** the loop while the clock - and therefore
+        //! the playhead, the measure/beat display and everything else - was back at the loop start. What you
+        //! hear then no longer matches what you see; when the loop ends at the end of the score it simply
+        //! goes silent, because the tracks get seeked past the last note on every single wrap.
+        //!
+        //! NOTE: reported by the user as "循环后播放的声音与音符不符" on the MIDI page (which is where
+        //! setting a loop became easy). See 进度快照.md 第 65 条 - the measurement was
+        //! `clock wraps to 2.01067 but the tracks are seeked to 6.01067` for a loop of [2, 6].
+        const TimePosition loopedTime = TimePosition::fromTime(m_timeLoopStart + overshoot, delta.sampleRate());
+
+        m_timeEvent.send(TimeEvent { TimeEventType::LoopEnded, loopedTime }); // forwarding an event to the engine thread
+        return loopedTime;
     }
 
     // Check: Duration
