@@ -47,7 +47,13 @@ static constexpr int PENDING_POINT_IDX = -2;
 //! Half the edge length of a bend handle's square, and how close the pointer has to get to grab it.
 //! The grab radius is deliberately the same order as the point hit radius: a handle sits on the
 //! line, and a handle that is hard to grab is worse than no handle at all.
-static constexpr qreal BEND_HANDLE_RADIUS = 3.0;
+//!
+//! ⚠️ The SIZE is part of what tells a handle apart from a point: a point is a 3px-radius circle,
+//! so a 4.5px-half *filled* square reads as a different kind of thing at a glance. Making a handle
+//! the same size as a point and only changing the outline shape does NOT work - at 6px, a squared-off
+//! ring and a circle look the same (exactly what a user reported on 2026-10-06).
+static constexpr qreal BEND_HANDLE_RADIUS = 4.5;
+static constexpr qreal BEND_HANDLE_HOVER_GROWTH = 1.5;
 static constexpr qreal BEND_HANDLE_HIT_RADIUS = 9.0;
 
 //! Samples per Bezier arc when a bent segment is turned into a polygon for hit-testing.
@@ -1372,18 +1378,24 @@ void PolylinePlot::drawBendHandles(QPainter* painter) const
         painter->drawLine(segment.bend, segment.to);
 
         const bool hovered = (segment.domainFrom == hoveredBendIdx);
-        const QColor fill = hovered ? m_standardPointStyle->centerColorHovered() : m_standardPointStyle->centerColor();
-        const QColor outline = hovered ? m_standardPointStyle->outlineColorHovered() : m_standardPointStyle->outlineColor();
 
-        const QRectF square(segment.bend.x() - BEND_HANDLE_RADIUS, segment.bend.y() - BEND_HANDLE_RADIUS,
-                            BEND_HANDLE_RADIUS * 2.0, BEND_HANDLE_RADIUS * 2.0);
+        //! ⚠️ 手柄必须和"控制点"**一眼分得开**（用户 2026-10-06 报「曲点与节点样式有点相似」）。
+        //! 只把轮廓从圆改成方是不够的 —— 6px 下一圈描边的圆和一个方块几乎一样。
+        //! 所以三处同时不同：**形状**（方 vs 圆）、**大小**（9px vs 6px）、**实心 vs 空心**。
+        //! 颜色刻意取控制点的**反色**（填充用它的描边色、描边用它的填充色）：
+        //! 正常谱面（浅底）与反色谱面（深底）都自动是"实心 vs 空心"的对比，不用额外配色。
+        const QColor fill = m_standardPointStyle->outlineColor();
+        const QColor outline = m_standardPointStyle->centerColor();
+
+        const qreal half = hovered ? BEND_HANDLE_RADIUS + BEND_HANDLE_HOVER_GROWTH : BEND_HANDLE_RADIUS;
+        const QRectF square(segment.bend.x() - half, segment.bend.y() - half, half * 2.0, half * 2.0);
 
         painter->setPen(Qt::NoPen);
         painter->setBrush(fill);
         painter->drawRect(square);
 
         QPen outlinePen(outline);
-        outlinePen.setWidthF(1.0);
+        outlinePen.setWidthF(hovered ? 2.0 : 1.5);
         painter->setPen(outlinePen);
         painter->setBrush(Qt::NoBrush);
         painter->drawRect(square);
