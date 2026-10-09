@@ -21,11 +21,7 @@
  */
 
 #include "polylineplot.h"
-<<<<<<< HEAD
-=======
 #include "internal/polylinebend.h"
-#include "realfn.h"
->>>>>>> b1f54b880 (ui(polylineplot): 每段一个弯折点 —— 自动化曲线能画弯、也能拖弯)
 
 #include <QCursor>
 #include <QPainter>

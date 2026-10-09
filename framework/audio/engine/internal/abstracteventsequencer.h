@@ -25,6 +25,8 @@
 #include <map>
 #include <set>
 
+#include <QtGlobal>
+
 #include "global/async/asyncable.h"
 #include "mpe/events.h"
 
@@ -113,6 +115,46 @@ public:
         if (m_onOffStreamFlushed) {
             m_onOffStreamFlushed();
         }
+    }
+
+    //! NOTE: [our addition] Take every pending off-stream ("audition") event at once, regardless of
+    //! the off-stream timeline position.
+    //!
+    //! WHY THIS EXISTS: while the transport RUNS, `movePlaybackForward()` returns through its active
+    //! branch, which has no room for off-stream events at all (the main stream is pre-loaded into the
+    //! synthesizer, and the off-stream timeline is only advanced in the inactive branch). So while
+    //! playing, audition events pile up in `m_offStreamEvents` and never reach the synth.
+    //! That is exactly the MIDI editor's realtime-recording situation ("play along with the
+    //! transport"): the note is recorded, but **nothing is heard** - reported by the user on
+    //! 2026-10-09 as "按下有音符，没有声音" (see 维护手册.md §4.8.4).
+    //!
+    //! The callers deliver the result at the START of the current block: these events mean "play
+    //! now", they carry no timeline position of their own (the renderer stamps them all at 0).
+    EventSequence takePendingOffStreamEvents()
+    {
+        ONLY_AUDIO_ENGINE_THREAD;
+
+        EventSequence result;
+        for (auto& pair : m_offStreamEvents) {
+            for (EventType& event : pair.second) {
+                result.push_back(std::move(event));
+            }
+        }
+
+        m_offStreamEvents.clear();
+        updateOffSequenceIterator();
+
+        return result;
+    }
+
+    //! NOTE: [our addition] Reverse-verification / escape hatch for the delivery above:
+    //! `MUSE_MIDI_AUDITION_WHILE_PLAYING=0` restores the pre-change behaviour (audition events are
+    //! dropped while the transport runs) **without a rebuild**, so the "before" state can be
+    //! measured again and a user hitting trouble can back out. Cached: this is read per audio block.
+    static bool auditionWhilePlayingEnabled()
+    {
+        static const bool enabled = qgetenv("MUSE_MIDI_AUDITION_WHILE_PLAYING") != "0";
+        return enabled;
     }
 
     void setActive(const bool active)
