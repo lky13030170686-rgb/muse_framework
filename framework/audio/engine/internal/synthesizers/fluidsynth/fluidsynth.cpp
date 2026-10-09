@@ -418,7 +418,30 @@ samples_t FluidSynth::process(float* buffer, samples_t samplesPerChannel)
     }
 
     const msecs_t nextMsecs = samplesToMsecs(samplesPerChannel, m_outputSpec.sampleRate);
-    const FluidSequencer::EventSequenceMap sequences = m_sequencer.movePlaybackForward(nextMsecs);
+    FluidSequencer::EventSequenceMap sequences = m_sequencer.movePlaybackForward(nextMsecs);
+
+    //! NOTE: [our addition] While the transport runs, `movePlaybackForward()` does not emit
+    //! off-stream (audition) events, so the MIDI-input audition is silent during playback - i.e.
+    //! while recording (see `AbstractEventSequencer::takePendingOffStreamEvents()`).
+    //! They mean "play now", so they go into the bucket of this block's start; buckets (and thus
+    //! the per-segment durations computed below) are unchanged, only that bucket gains events.
+    if (m_sequencer.isActive() && FluidSequencer::auditionWhilePlayingEnabled()) {
+        FluidSequencer::EventSequence audition = m_sequencer.takePendingOffStreamEvents();
+        if (!audition.empty()) {
+            if (qEnvironmentVariableIsSet("MUSE_MIDI_LATENCY_TRACE")) {
+                LOGW() << "[midi-lat] engine audition (fluid): events=" << audition.size()
+                       << " playing=1 pos=" << m_sequencer.playbackPosition().raw();
+            }
+
+            IF_ASSERT_FAILED(!sequences.empty()) {
+                //! 不可能走到：active 时 movePlaybackForward() 一定已经插入了"本块起点"那个桶。
+            } else {
+                FluidSequencer::EventSequence& atBlockStart = sequences.begin()->second;
+                atBlockStart.insert(atBlockStart.end(), std::make_move_iterator(audition.begin()),
+                                    std::make_move_iterator(audition.end()));
+            }
+        }
+    }
     samples_t sampleOffset = 0;
 
     for (auto it = sequences.cbegin(); it != sequences.cend(); ++it) {

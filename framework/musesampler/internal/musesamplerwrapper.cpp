@@ -160,15 +160,30 @@ samples_t MuseSamplerWrapper::process(float* buffer, samples_t samplesPerChannel
     prepareOutputBuffer(samplesPerChannel);
 
     bool active = isActive();
+    msecs_t nextMicros = samplesToMsecs(samplesPerChannel, m_outputSpec.sampleRate);
 
+    MuseSamplerSequencer::EventSequenceMap sequences;
     if (!active) {
-        msecs_t nextMicros = samplesToMsecs(samplesPerChannel, m_outputSpec.sampleRate);
-        MuseSamplerSequencer::EventSequenceMap sequences = m_sequencer.movePlaybackForward(nextMicros);
-
-        for (const auto& pair : sequences) {
-            for (const MuseSamplerSequencer::EventType& event : pair.second) {
-                handleAuditionEvents(event);
+        sequences = m_sequencer.movePlaybackForward(nextMicros);
+    } else if (MuseSamplerSequencer::auditionWhilePlayingEnabled()) {
+        //! NOTE: [our addition] While the sampler is playing, `movePlaybackForward()` is not called
+        //! at all (the main stream is pre-loaded into the sampler), so off-stream (audition) events
+        //! would never be handed over: pressing a key on the MIDI keyboard **while the transport
+        //! runs** was silent. Hand them over here instead - see
+        //! `AbstractEventSequencer::takePendingOffStreamEvents()`.
+        MuseSamplerSequencer::EventSequence audition = m_sequencer.takePendingOffStreamEvents();
+        if (!audition.empty()) {
+            if (qEnvironmentVariableIsSet("MUSE_MIDI_LATENCY_TRACE")) {
+                LOGW() << "[midi-lat] engine audition (musesampler): events=" << audition.size() << " playing=1";
             }
+
+            sequences.emplace(0, std::move(audition));
+        }
+    }
+
+    for (const auto& pair : sequences) {
+        for (const MuseSamplerSequencer::EventType& event : pair.second) {
+            handleAuditionEvents(event);
         }
     }
 
