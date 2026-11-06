@@ -178,17 +178,25 @@ private:
             addPending();
             removePending();
 
-            for (const Receiver* r : receivers) {
-                if (r->enabled) {
+            //! ⚠️ Iterate over a *copy*: a callback may subscribe/unsubscribe
+            //! (also through a nested send on this same channel), which would
+            //! reallocate or erase from `receivers` and invalidate the iterator
+            //! mid-loop => use-after-free / call through a freed callback.
+            ++sendDepth;
+            const std::vector<Receiver*> snapshot = receivers;
+            for (Receiver* r : snapshot) {
+                if (r->enabled && r->callback) {
                     r->callback(args ...);
                 }
             }
+            --sendDepth;
 
             // during the execution of the callback,
             // they can remove and add new receivers,
             // we will apply them immediately.
             removePending();
             addPending();
+            removePendingIfIdle();
         }
 
         inline void receiversCall(const CallMsg& m)
@@ -196,17 +204,22 @@ private:
             addPending();
             removePending();
 
-            for (const Receiver* r : receivers) {
-                if (r->enabled) {
+            //! ⚠️ Same reason as above: never iterate `receivers` directly.
+            ++sendDepth;
+            const std::vector<Receiver*> snapshot = receivers;
+            for (Receiver* r : snapshot) {
+                if (r->enabled && r->callback) {
                     m.func->call(r);
                 }
             }
+            --sendDepth;
 
             // during the execution of the callback,
             // they can remove and add new receivers,
             // we will apply them immediately.
             removePending();
             addPending();
+            removePendingIfIdle();
         }
 
         inline void clearReceivers(Asyncable::IConnectable* conn)
@@ -223,6 +236,13 @@ private:
 
             deleteAll(receivers, conn);
             deleteAll(pendingToAdd, conn);
+            //! Receivers that were removed but not yet unlinked are still in
+            //! `receivers` (or `pendingToAdd`) and have been deleted above —
+            //! only the entries erased during a running send (`pendingToDelete`)
+            //! are owned here. Deleting `pendingToRemove` would double-free.
+            pendingToRemove.clear();
+            deleteAll(pendingToDelete, conn);
+            sendDepth = 0;
         }
 
         QueueData* addQueue(size_t queue_capacity, const std::thread::id& receiveTh,
@@ -299,11 +319,30 @@ private:
                 auto it = std::find(receivers.begin(), receivers.end(), r);
                 assert(it != receivers.end());
                 if (it != receivers.end()) {
-                    delete r;
                     receivers.erase(it);
+                    //! ⚠️ While a send is running, its snapshot still holds this
+                    //! pointer (`r->enabled` is read before the call), so the
+                    //! memory must stay alive until the outermost send returns.
+                    if (sendDepth > 0) {
+                        pendingToDelete.push_back(r);
+                    } else {
+                        delete r;
+                    }
                 }
             }
             pendingToRemove.clear();
+        }
+
+        inline void removePendingIfIdle()
+        {
+            if (sendDepth > 0 || pendingToDelete.empty()) {
+                return;
+            }
+
+            for (Receiver* r : pendingToDelete) {
+                delete r;
+            }
+            pendingToDelete.clear();
         }
 
         inline auto findByAsyncable(const std::vector<Receiver*>& recs, const Asyncable* a) const
@@ -317,6 +356,8 @@ private:
         std::vector<Receiver*> receivers;
         std::vector<Receiver*> pendingToAdd;
         std::vector<Receiver*> pendingToRemove;
+        std::vector<Receiver*> pendingToDelete;   // removed while a send was running
+        int sendDepth = 0;                        // nesting depth of receiversCall
         std::atomic<size_t> rcount = 0;
     };
 
