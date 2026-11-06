@@ -562,6 +562,22 @@ Ret CommandShortcutsRegister::importFromFile(const io::path_t& filePath)
         return make_ret(Ret::Code::UnknownError);
     }
 
+    //! Validate BEFORE replacing the user's file.
+    //! The old code copied whatever was selected over `shortcuts.json` and only then tried to
+    //! parse it; on failure `readFromFile` merely returned false, `reload()` fell back to the
+    //! defaults, and the unparseable file stayed on disk. Symptom: "I imported my shortcuts and
+    //! nothing happened" — with a copy of the previous file already destroyed (2026-11-06).
+    //! A legacy MuseScore 4 export (`<Shortcuts><SC><key>...`) is NOT valid here: this register
+    //! only reads the command+scope JSON dialect.
+    {
+        ShortcutList probe;
+        if (!readFromFile(probe, filePath)) {
+            LOGE() << "failed import file: not a shortcuts JSON (legacy .xml exports are not "
+                      "supported by this register): " << filePath;
+            return make_ret(Ret::Code::UnknownError);
+        }
+    }
+
     {
         mi::WriteResourceLockGuard guard(multiwindowsProvider(), COMMAND_SHORTCUTS_TAG);
         Ret ret = io::File::copy(filePath, userPath, true);

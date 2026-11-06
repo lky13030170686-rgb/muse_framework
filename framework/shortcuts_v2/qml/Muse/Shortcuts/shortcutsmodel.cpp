@@ -37,7 +37,13 @@ using namespace muse::rcommand;
 
 static std::vector<std::string> shortcutsFileFilter()
 {
-    return { muse::trc("shortcuts", "MuseScore Studio shortcuts file") + " (*.xml)" };
+    return {
+        //! This register only reads the command+scope JSON dialect (see importFromFile).
+        muse::trc("shortcuts", "MuseScore Studio shortcuts file") + " (*.json)",
+        //! Kept selectable so a legacy MuseScore 4 export gets *reported* instead of silently
+        //! doing nothing (2026-11-06 report: "the imported shortcuts do nothing").
+        muse::trc("shortcuts", "Legacy MuseScore 4 shortcuts file") + " (*.xml)"
+    };
 }
 
 ShortcutsModel::ShortcutsModel(QObject* parent)
@@ -205,8 +211,22 @@ void ShortcutsModel::importShortcutsFromFile()
         globalConfiguration()->homePath(),
         shortcutsFileFilter());
 
-    if (!path.empty()) {
-        commandShortcutsRegister()->importFromFile(path);
+    if (path.empty()) {
+        return;
+    }
+
+    Ret ret = commandShortcutsRegister()->importFromFile(path);
+    if (!ret) {
+        //! ⛔ Never swallow this: a failed import used to leave the user's file replaced by
+        //! something the register cannot parse, then fall back to the defaults — the UI
+        //! looked exactly like a successful import that changed nothing (2026-11-06).
+        LOGE() << "failed import shortcuts: " << ret.toString();
+        interactive()->error(
+            trc("shortcuts", "Import shortcuts"),
+            trc("shortcuts",
+                "This file could not be imported. Shortcuts are now stored as JSON with a scope per "
+                "command; an older MuseScore 4 shortcut file (*.xml) has to be converted first."),
+            { interactive()->buttonData(IInteractive::Button::Ok) });
     }
 }
 
